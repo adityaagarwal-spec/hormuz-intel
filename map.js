@@ -7,7 +7,7 @@ const MapModule = (() => {
 
   // ── Constants ──────────────────────────────────────────────
   const HORMUZ_CENTER = [26.5, 56.5];
-  const INITIAL_ZOOM  = 9;
+  const INITIAL_ZOOM  = 6;
 
   const STATUS_COLORS = {
     suspicious: '#ff3b3b',
