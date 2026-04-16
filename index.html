@@ -63,7 +63,11 @@
         <span>LIVE FEED</span>
       </div>
       <div class="topbar-status">
-        <span>▲ AIS</span>
+        <div id="ais-dot" style="width:7px;height:7px;border-radius:50%;background:#ffd700;flex-shrink:0;transition:all 0.3s"></div>
+        <span id="ais-label" style="color:#ffd700;transition:color 0.3s">AIS CONNECTING…</span>
+        <span style="color:#4a6280">·</span>
+        <span id="ais-count" style="color:#3b9eff;font-family:var(--font-mono)">0</span>
+        <span style="color:#4a6280">vessels</span>
       </div>
       <div class="topbar-status">
         <span>ADINT</span>
@@ -189,6 +193,7 @@
 
 <!-- App scripts -->
 <script src="map.js"></script>
+<script src="ais.js"></script>
 <script src="dashboard.js"></script>
 <script src="chat.js"></script>
 

@@ -58,6 +58,9 @@ const MapModule = (() => {
     markerLayer = L.layerGroup().addTo(map);
     deviceLayer = L.layerGroup().addTo(map);
 
+    // Live AIS stream
+    AISModule.init(map);
+
     // Add strait boundary (approximate corridor)
     drawStraitBoundary();
 
