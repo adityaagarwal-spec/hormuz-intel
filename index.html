@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HORMUZ INTEL — Maritime Intelligence Dashboard</title>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap"
+        rel="stylesheet" />
+
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ── TOP BAR ───────────────────────────────────────────── -->
+  <header id="topbar">
+
+    <!-- Brand -->
+    <div class="topbar-brand">
+      <div class="brand-icon">⚓</div>
+      <div>
+        <div class="brand-name">Hormuz Intel</div>
+        <div class="brand-sub">Maritime Intelligence Platform</div>
+      </div>
+    </div>
+
+    <!-- Search -->
+    <div id="search-container">
+      <span class="search-icon">⌕</span>
+      <input
+        id="search-input"
+        type="text"
+        placeholder="Search ADID — e.g. ADID-8821-IR"
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <button id="search-clear" title="Clear search">✕</button>
+
+      <!-- Search Result Panel -->
+      <div id="search-result">
+        <div class="search-result-header">
+          <span class="search-result-adid"></span>
+          <span class="search-result-badge"></span>
+          <button id="search-result-close" class="search-result-close">✕</button>
+        </div>
+        <div class="search-result-vessel"></div>
+        <div class="search-result-coords"></div>
+      </div>
+    </div>
+
+    <!-- Right status items -->
+    <div class="topbar-right">
+      <div class="topbar-status">
+        <div class="pulse-dot"></div>
+        <span>LIVE FEED</span>
+      </div>
+      <div class="topbar-status">
+        <span>▲ AIS</span>
+      </div>
+      <div class="topbar-status">
+        <span>ADINT</span>
+      </div>
+      <div class="topbar-time" id="clock">--:--:-- UTC</div>
+
+      <!-- ARIA Chat Toggle -->
+      <button id="chat-toggle-btn" onclick="ChatModule.toggle()" title="ARIA — AI Intelligence Analyst">
+        <span class="chat-btn-icon">◈</span>
+        <span class="chat-btn-label">ARIA</span>
+      </button>
+    </div>
+
+  </header>
+
+  <!-- ── MAIN ──────────────────────────────────────────────── -->
+  <div id="main">
+
+    <!-- Map -->
+    <div id="map-container">
+      <div id="map"></div>
+      <div class="map-classification">
+        UNCLASSIFIED // FOR DEMONSTRATION PURPOSES ONLY // NOT FOR OPERATIONAL USE
+      </div>
+    </div>
+
+    <!-- ── RIGHT SIDEBAR ──────────────────────────────────── -->
+    <aside id="sidebar">
+
+      <!-- Counters -->
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">Situation Summary</div>
+        <div class="counters-grid">
+          <div class="counter-card total">
+            <div class="counter-value" id="counter-total">0</div>
+            <div class="counter-label">Vessels<br>In Strait</div>
+          </div>
+          <div class="counter-card highrisk">
+            <div class="counter-value" id="counter-highrisk">0</div>
+            <div class="counter-label">High Risk<br>Vessels</div>
+          </div>
+          <div class="counter-card alerts">
+            <div class="counter-value" id="counter-alerts">0</div>
+            <div class="counter-label">Active<br>Alerts</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Vessel List -->
+      <div class="sidebar-section" id="vessel-list-section">
+        <div class="sidebar-section-title">Tracked Vessels</div>
+        <div id="vessel-list-scroll">
+          <!-- Populated by dashboard.js -->
+        </div>
+      </div>
+
+      <!-- Signal Feed -->
+      <div id="signal-feed">
+        <div class="sidebar-section" style="border-bottom:none; padding-bottom:6px;">
+          <div class="sidebar-section-title">Signal Feed</div>
+        </div>
+        <div class="signal-feed-scroll">
+          <div id="signal-list">
+            <!-- Populated by dashboard.js -->
+          </div>
+        </div>
+      </div>
+
+    </aside>
+
+  </div><!-- /#main -->
+
+  <!-- ── ARIA CHAT PANEL ────────────────────────────────────── -->
+  <div id="chat-panel">
+
+    <div class="chat-header">
+      <div class="chat-header-left">
+        <div class="chat-aria-icon">◈</div>
+        <div>
+          <div class="chat-title">ARIA</div>
+          <div class="chat-subtitle">Automated Regional Intelligence Analyst</div>
+        </div>
+      </div>
+      <div class="chat-header-actions">
+        <button class="chat-action-btn" onclick="ChatModule.clearChat()" title="Clear conversation">⊘</button>
+        <button class="chat-action-btn" onclick="ChatModule.toggle()" title="Close">✕</button>
+      </div>
+    </div>
+
+    <!-- Quick prompts -->
+    <div class="chat-quick-prompts">
+      <button onclick="ChatModule.quickPrompt('Which vessels are highest risk right now?')">Top threats</button>
+      <button onclick="ChatModule.quickPrompt('Summarize all active ADINT signals')">ADINT summary</button>
+      <button onclick="ChatModule.quickPrompt('What is SHADOW RUNNER and why is it suspicious?')">SHADOW RUNNER</button>
+      <button onclick="ChatModule.quickPrompt('Are there any signs of a ship-to-ship transfer happening?')">STS activity</button>
+    </div>
+
+    <div id="chat-messages"></div>
+
+    <div class="chat-input-row">
+      <textarea
+        id="chat-input"
+        placeholder="Ask ARIA about vessels, signals, threats…"
+        rows="1"
+        spellcheck="false"
+      ></textarea>
+      <button id="chat-send" disabled>
+        <span>⬆</span>
+      </button>
+    </div>
+
+    <div class="chat-footer">Powered by Claude · Context: 10 vessels · 12 signals</div>
+
+  </div><!-- /#chat-panel -->
+
+</div><!-- /#app -->
+
+<!-- Toast notification -->
+<div id="toast"></div>
+
+<!-- Leaflet JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+
+<!-- App scripts -->
+<script src="map.js"></script>
+<script src="dashboard.js"></script>
+<script src="chat.js"></script>
+
+</body>
+</html>
