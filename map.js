@@ -1,13 +1,13 @@
 /**
- * map.js — Leaflet map logic for Hormuz Intel Dashboard
- * Handles map init, vessel markers, popups, and highlighting
+ * map.js — MapLibre GL JS map (WebGL, 3D pitch, CartoDB Dark tiles)
  */
 
 const MapModule = (() => {
 
-  // ── Constants ──────────────────────────────────────────────
-  const HORMUZ_CENTER = [26.5, 56.5];
-  const INITIAL_ZOOM  = 6;
+  const HORMUZ_CENTER  = [56.5, 26.5]; // [lng, lat] — MapLibre order
+  const INITIAL_ZOOM   = 6;
+  const INITIAL_PITCH  = 45;
+  const INITIAL_BEARING = -10;
 
   const STATUS_COLORS = {
     suspicious: '#ff3b3b',
@@ -15,150 +15,133 @@ const MapModule = (() => {
     normal:     '#00e676',
   };
 
-  const RISK_COLORS = (score) => {
-    if (score >= 75) return '#ff3b3b';
-    if (score >= 40) return '#ffd700';
-    return '#00e676';
-  };
+  const RISK_COLORS = s => s >= 75 ? '#ff3b3b' : s >= 40 ? '#ffd700' : '#00e676';
 
-  // Country code → flag emoji
   const FLAG_MAP = {
-    IR: '🇮🇷', AE: '🇦🇪', GR: '🇬🇷', SA: '🇸🇦',
-    XX: '🏴', CN: '🇨🇳', OM: '🇴🇲', PA: '🇵🇦',
-    RU: '🇷🇺', IN: '🇮🇳',
+    IR:'🇮🇷', AE:'🇦🇪', GR:'🇬🇷', SA:'🇸🇦',
+    XX:'🏴',  CN:'🇨🇳', OM:'🇴🇲', PA:'🇵🇦',
+    RU:'🇷🇺', IN:'🇮🇳',
   };
 
-  // ── State ──────────────────────────────────────────────────
-  let map = null;
-  let markerLayer = null;
-  let deviceLayer = null;
-  let markers = {};      // vesselId → { marker, circleMarker, ring }
+  let map            = null;
+  let markers        = {};   // vesselId → { marker, el }
+  let deviceMarker   = null;
   let activeHighlight = null;
-  let vessels = [];
+  let vessels        = [];
 
   // ── Init ───────────────────────────────────────────────────
   function init(vesselData) {
     vessels = vesselData;
 
-    map = L.map('map', {
+    map = new maplibregl.Map({
+      container: 'map',
+      style: buildStyle(),
       center: HORMUZ_CENTER,
       zoom: INITIAL_ZOOM,
-      zoomControl: true,
-      attributionControl: true,
+      pitch: INITIAL_PITCH,
+      bearing: INITIAL_BEARING,
+      antialias: true,
     });
 
-    // Dark tile layer — CartoDB Dark Matter
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
-      subdomains: 'abcd',
-      maxZoom: 19,
-    }).addTo(map);
+    map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-left');
+    map.addControl(new maplibregl.ScaleControl({ unit: 'nautical' }), 'bottom-left');
 
-    // Layer groups
-    markerLayer = L.layerGroup().addTo(map);
-    deviceLayer = L.layerGroup().addTo(map);
-
-    // Live AIS stream
-    AISModule.init(map);
-
-    // Add strait boundary (approximate corridor)
-    drawStraitBoundary();
-
-    // Plot vessels
-    vessels.forEach(addVesselMarker);
+    map.on('load', () => {
+      drawStraitCorridor();
+      vessels.forEach(addVesselMarker);
+      AISModule.init(map);
+    });
   }
 
-  // ── Strait Boundary ────────────────────────────────────────
-  function drawStraitBoundary() {
-    // Approximate navigable corridor through the Strait of Hormuz
-    const corridor = [
-      [27.05, 55.10], [26.80, 55.50], [26.60, 55.90],
-      [26.50, 56.30], [26.45, 56.70], [26.40, 57.10],
-      [26.35, 57.50],
+  // ── Style ──────────────────────────────────────────────────
+  function buildStyle() {
+    return {
+      version: 8,
+      sources: {
+        'carto': {
+          type: 'raster',
+          tiles: [
+            'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
+            'https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
+            'https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
+            'https://d.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
+          ],
+          tileSize: 256,
+          attribution: '© <a href="https://www.openstreetmap.org/copyright">OSM</a> © <a href="https://carto.com/">CARTO</a>',
+          maxzoom: 19,
+        }
+      },
+      layers: [
+        { id: 'bg',    type: 'background', paint: { 'background-color': '#060d1a' } },
+        { id: 'tiles', type: 'raster',     source: 'carto' },
+      ]
+    };
+  }
+
+  // ── Strait Corridor ────────────────────────────────────────
+  function drawStraitCorridor() {
+    const coords = [
+      [55.10,27.05],[55.50,26.80],[55.90,26.60],
+      [56.30,26.50],[56.70,26.45],[57.10,26.40],[57.50,26.35],
     ];
 
-    L.polyline(corridor, {
-      color: 'rgba(59, 158, 255, 0.25)',
-      weight: 18,
-      lineCap: 'round',
-      lineJoin: 'round',
-    }).addTo(map);
-
-    L.polyline(corridor, {
-      color: 'rgba(59, 158, 255, 0.55)',
-      weight: 1.5,
-      dashArray: '6 4',
-    }).addTo(map).bindTooltip('Strait of Hormuz — Navigable Channel', {
-      permanent: false,
-      className: 'strait-tooltip',
-      direction: 'top',
+    map.addSource('strait', {
+      type: 'geojson',
+      data: { type:'Feature', geometry:{ type:'LineString', coordinates: coords } }
     });
+
+    map.addLayer({ id:'strait-glow', type:'line', source:'strait',
+      paint:{ 'line-color':'rgba(59,158,255,0.12)', 'line-width':32, 'line-blur':12 } });
+
+    map.addLayer({ id:'strait-dash', type:'line', source:'strait',
+      paint:{ 'line-color':'rgba(59,158,255,0.55)', 'line-width':1.5,
+              'line-dasharray':[6,4] } });
   }
 
-  // ── Vessel Markers ─────────────────────────────────────────
+  // ── Mock Vessel Markers ────────────────────────────────────
   function addVesselMarker(vessel) {
     const color = STATUS_COLORS[vessel.status];
 
-    // Outer pulse ring
-    const ring = L.circleMarker([vessel.lat, vessel.lng], {
-      radius: 14,
-      color: color,
-      weight: 1,
-      fillColor: color,
-      fillOpacity: 0,
-      opacity: 0.3,
-      className: 'vessel-ring',
-    }).addTo(markerLayer);
+    const el = document.createElement('div');
+    el.className = `v-marker v-${vessel.status}`;
+    el.innerHTML = `
+      <div class="v-core" style="background:${color};box-shadow:0 0 8px ${color}88"></div>
+      <div class="v-ring"  style="border-color:${color}"></div>`;
 
-    // Main vessel marker
-    const marker = L.circleMarker([vessel.lat, vessel.lng], {
-      radius: 7,
-      color: color,
-      weight: 2,
-      fillColor: color,
-      fillOpacity: 0.85,
-      className: `vessel-marker vessel-${vessel.status}`,
-    }).addTo(markerLayer);
+    const popup = new maplibregl.Popup({
+      maxWidth: '300px', offset: 14, className: 'ml-popup'
+    }).setHTML(buildPopupHTML(vessel));
 
-    // Direction indicator (heading line)
-    const headingRad = ((vessel.heading - 90) * Math.PI) / 180;
-    const len = 0.04;
-    const endLat = vessel.lat + len * Math.cos(headingRad);
-    const endLng = vessel.lng + len * Math.sin(headingRad);
+    const marker = new maplibregl.Marker({ element: el })
+      .setLngLat([vessel.lng, vessel.lat])
+      .setPopup(popup)
+      .addTo(map);
 
-    L.polyline([[vessel.lat, vessel.lng], [endLat, endLng]], {
-      color: color,
-      weight: 1.5,
-      opacity: 0.7,
-    }).addTo(markerLayer);
+    el.addEventListener('click', () => DashboardModule.highlightVesselInList(vessel.id));
 
-    // Popup
-    marker.bindPopup(buildPopupHTML(vessel), {
-      maxWidth: 300,
-      className: 'vessel-popup-container',
+    // Heading line
+    const rad  = ((vessel.heading - 90) * Math.PI) / 180;
+    const len  = 0.045;
+    const eLat = vessel.lat + len * Math.cos(rad);
+    const eLng = vessel.lng + len * Math.sin(rad);
+
+    map.addSource(`hdg-${vessel.id}`, {
+      type:'geojson',
+      data:{ type:'Feature', geometry:{ type:'LineString',
+             coordinates:[[vessel.lng, vessel.lat],[eLng, eLat]] } }
     });
+    map.addLayer({ id:`hdg-${vessel.id}`, type:'line', source:`hdg-${vessel.id}`,
+      paint:{ 'line-color': color, 'line-width':1.5, 'line-opacity':0.7 } });
 
-    // Hover tooltip
-    marker.bindTooltip(
-      `<b>${vessel.name}</b><br>${vessel.flagName} · Risk: ${vessel.riskScore}`,
-      { direction: 'top', offset: [0, -8], className: 'vessel-tooltip' }
-    );
-
-    // Click → also highlight in sidebar
-    marker.on('click', () => {
-      DashboardModule.highlightVesselInList(vessel.id);
-    });
-
-    markers[vessel.id] = { marker, ring };
+    markers[vessel.id] = { marker, el, color };
   }
 
   // ── Popup HTML ─────────────────────────────────────────────
   function buildPopupHTML(v) {
     const flag  = FLAG_MAP[v.flag] || '🏳';
-    const color = STATUS_COLORS[v.status];
-    const riskColor = RISK_COLORS(v.riskScore);
-    const timeStr   = formatTime(v.lastSeen);
-    const coordStr  = `${v.lat.toFixed(4)}°N, ${v.lng.toFixed(4)}°E`;
+    const rc    = RISK_COLORS(v.riskScore);
+    const coord = `${v.lat.toFixed(4)}°N, ${v.lng.toFixed(4)}°E`;
+    const time  = new Date(v.lastSeen).toISOString().replace('T',' ').slice(0,16)+'Z';
 
     return `
       <div class="vessel-popup">
@@ -166,139 +149,92 @@ const MapModule = (() => {
           <div class="vessel-popup-flag flag-emoji">${flag}</div>
           <div class="vessel-popup-title">
             <h3>${v.name}</h3>
-            <div class="flag-name">${v.flagName} &nbsp;·&nbsp; IMO: ${v.imo}</div>
+            <div class="flag-name">${v.flagName} · IMO: ${v.imo}</div>
           </div>
           <div class="risk-badge">
-            <div class="risk-score-num" style="color:${riskColor}">${v.riskScore}</div>
+            <div class="risk-score-num" style="color:${rc}">${v.riskScore}</div>
             <div class="risk-score-label">Risk</div>
           </div>
         </div>
         <div class="vessel-popup-body">
           <div class="popup-status-bar">
             <span class="status-pill ${v.status}">⬤ ${v.status.toUpperCase()}</span>
-            <span style="font-size:10px;color:#4a6280;">MMSI: ${v.mmsi}</span>
+            <span style="font-size:10px;color:#4a6280">MMSI: ${v.mmsi}</span>
           </div>
-          <div class="popup-row">
-            <span class="label">Cargo</span>
-            <span class="value">${v.cargo}</span>
-          </div>
-          <div class="popup-row">
-            <span class="label">Speed</span>
-            <span class="value">${v.speed} kts / HDG ${v.heading}°</span>
-          </div>
-          <div class="popup-row">
-            <span class="label">Position</span>
-            <span class="value">${coordStr}</span>
-          </div>
-          <div class="popup-row">
-            <span class="label">Last Seen</span>
-            <span class="value">${timeStr}</span>
-          </div>
-          <div class="popup-row">
-            <span class="label">ADID</span>
-            <span class="value" style="color:#3b9eff">${v.adid}</span>
-          </div>
+          <div class="popup-row"><span class="label">Cargo</span><span class="value">${v.cargo}</span></div>
+          <div class="popup-row"><span class="label">Speed</span><span class="value">${v.speed} kts / HDG ${v.heading}°</span></div>
+          <div class="popup-row"><span class="label">Position</span><span class="value">${coord}</span></div>
+          <div class="popup-row"><span class="label">Last Seen</span><span class="value">${time}</span></div>
+          <div class="popup-row"><span class="label">ADID</span><span class="value" style="color:#3b9eff">${v.adid}</span></div>
         </div>
-        <div class="vessel-popup-footer">
-          <div class="popup-notes">${v.notes}</div>
-        </div>
-      </div>
-    `;
+        <div class="vessel-popup-footer"><div class="popup-notes">${v.notes}</div></div>
+      </div>`;
   }
 
-  // ── Highlight Vessel ───────────────────────────────────────
+  // ── Highlight ──────────────────────────────────────────────
   function highlightVessel(vesselId, panTo = true) {
     clearHighlight();
-
     const vessel = vessels.find(v => v.id === vesselId);
     if (!vessel) return;
-
     const m = markers[vesselId];
     if (!m) return;
 
-    // Animate ring
-    m.ring.setStyle({
-      opacity: 0.9,
-      fillOpacity: 0.15,
-      weight: 2,
-    });
-    m.ring.setRadius(16);
+    m.el.classList.add('highlighted');
+    m.marker.togglePopup();
 
-    // Open popup
-    m.marker.openPopup();
-
-    // Pan to vessel
     if (panTo) {
-      map.flyTo([vessel.lat, vessel.lng], Math.max(map.getZoom(), 10), {
-        duration: 1.2,
-        easeLinearity: 0.4,
-      });
+      map.flyTo({ center:[vessel.lng, vessel.lat],
+                  zoom: Math.max(map.getZoom(), 10),
+                  duration: 1400, essential: true });
     }
 
-    // Show device location pin
     showDevicePin(vessel);
-
     activeHighlight = vesselId;
   }
 
   function clearHighlight() {
-    if (activeHighlight && markers[activeHighlight]) {
-      const m = markers[activeHighlight];
-      m.ring.setStyle({ opacity: 0.3, fillOpacity: 0, weight: 1 });
-      m.ring.setRadius(14);
+    if (activeHighlight && markers[activeHighlight])
+      markers[activeHighlight].el.classList.remove('highlighted');
+    if (deviceMarker) { deviceMarker.remove(); deviceMarker = null; }
+    if (map && map.getSource('dev-line')) {
+      map.removeLayer('dev-line-layer');
+      map.removeSource('dev-line');
     }
-    deviceLayer.clearLayers();
     activeHighlight = null;
   }
 
-  // ── Device Location Pin ────────────────────────────────────
   function showDevicePin(vessel) {
-    deviceLayer.clearLayers();
+    if (map.getSource('dev-line')) {
+      map.removeLayer('dev-line-layer');
+      map.removeSource('dev-line');
+    }
+    map.addSource('dev-line', {
+      type:'geojson',
+      data:{ type:'Feature', geometry:{ type:'LineString',
+             coordinates:[[vessel.lng,vessel.lat],[vessel.deviceLng,vessel.deviceLat]] } }
+    });
+    map.addLayer({ id:'dev-line-layer', type:'line', source:'dev-line',
+      paint:{ 'line-color':'#00d4ff','line-width':1,'line-dasharray':[4,4],'line-opacity':0.7 } });
 
-    // Dashed line from vessel to device
-    L.polyline(
-      [[vessel.lat, vessel.lng], [vessel.deviceLat, vessel.deviceLng]],
-      { color: '#00d4ff', weight: 1, dashArray: '4 4', opacity: 0.7 }
-    ).addTo(deviceLayer);
+    const el = document.createElement('div');
+    el.className = 'device-pin';
+    el.title = `${vessel.adid} · ${vessel.deviceLat.toFixed(5)}°N, ${vessel.deviceLng.toFixed(5)}°E`;
 
-    // Device dot
-    const devMarker = L.circleMarker([vessel.deviceLat, vessel.deviceLng], {
-      radius: 5,
-      color: '#00d4ff',
-      weight: 2,
-      fillColor: '#00d4ff',
-      fillOpacity: 0.6,
-    }).addTo(deviceLayer);
-
-    devMarker.bindTooltip(
-      `<b>Device: ${vessel.adid}</b><br>${vessel.deviceLat.toFixed(5)}°N, ${vessel.deviceLng.toFixed(5)}°E`,
-      { direction: 'top', className: 'vessel-tooltip' }
-    ).openTooltip();
+    deviceMarker = new maplibregl.Marker({ element: el })
+      .setLngLat([vessel.deviceLng, vessel.deviceLat])
+      .setPopup(new maplibregl.Popup({ offset:10, className:'ml-popup' }).setHTML(
+        `<div style="padding:8px;font-family:monospace;font-size:11px;color:#00d4ff">
+          <b>${vessel.adid}</b><br>
+          ${vessel.deviceLat.toFixed(5)}°N, ${vessel.deviceLng.toFixed(5)}°E
+        </div>`))
+      .addTo(map);
   }
 
-  // ── Utils ──────────────────────────────────────────────────
-  function formatTime(isoString) {
-    const d = new Date(isoString);
-    return d.toISOString().replace('T', ' ').slice(0, 16) + 'Z';
-  }
-
-  function getVesselById(id) {
-    return vessels.find(v => v.id === id) || null;
-  }
-
+  function getVesselById(id) { return vessels.find(v => v.id === id) || null; }
   function flyTo(lat, lng, zoom = 11) {
-    map.flyTo([lat, lng], zoom, { duration: 1.2, easeLinearity: 0.4 });
+    map.flyTo({ center:[lng, lat], zoom, duration:1400, essential:true });
   }
+  function getMap() { return map; }
 
-  // ── Public API ─────────────────────────────────────────────
-  return {
-    init,
-    highlightVessel,
-    clearHighlight,
-    getVesselById,
-    flyTo,
-    FLAG_MAP,
-    STATUS_COLORS,
-  };
-
+  return { init, highlightVessel, clearHighlight, getVesselById, flyTo, getMap, FLAG_MAP, STATUS_COLORS };
 })();
